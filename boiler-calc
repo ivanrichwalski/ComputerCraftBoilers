@@ -1,0 +1,332 @@
+--[[
+
+  CDDL HEADER START
+
+  The contents of this file are subject to the terms of the
+  Common Development and Distribution License (the "License").
+  You may not use this file except in compliance with the License.
+
+  You can obtain a copy of the license at LICENSE.txt
+  or http://opensource.org/licenses/CDDL-1.0.
+  See the License for the specific language governing permissions
+  and limitations under the License.
+
+  When distributing Covered Code, include this CDDL HEADER in each
+  file and include the License file at LICENSE.txt
+  If applicable, add the following below this CDDL HEADER, with the
+  fields enclosed by brackets "[]" replaced with your own identifying
+  information: Portions Copyright [yyyy] [name of copyright owner]
+
+  CDDL HEADER END
+ 
+  Copyright (c) 2013 by Ivan Richwalski. All rights reserved.
+
+  https://github.com/ivanrichwalski/ComputerCraftBoilers
+  
+  Simple tool for calculating boiler related information
+
+]]
+
+function usage()
+
+	print( "usage: boiler-calc <type> <function> .." )
+	print( "" )
+	print( "  type" )
+	print( "      Size & pressure of the boiler to simulate." )
+	print( "      ( 1hp, 8LP, 27LP, 36hp )" )
+	print( "" )
+	print( "  heat <start> <end>" )
+	print( "      Displays the time needed and heat units used")
+	print( "      to heat up from <start> to <end> temperature." )
+	print( "" )
+	print( "  cool <start> <end>" )
+	print( "      Displays the time to cool down from <start>" )
+	print( "      to <end> temperature." )
+	print( "" )
+	print( "  burn <temperature> <fuel>")
+	print( "      Calculates the length of time a given amount" )
+	print( "      of fuel will burn at a certain temperature." )
+
+end
+
+local function ticksToTime( ticks )
+	
+	local time = {}
+	time["hours"] = math.floor( ticks / 72000 )
+	time["minutes"] = math.floor( ticks / 1200 )
+	time["seconds"] = math.floor( ticks / 20 )
+	time["fraction"] = ( ticks % 20 ) * 0.05
+
+	time["string"] = ""
+
+	if ( time["hours"] > 0 ) then
+		time["string"] = time["hours"] .. "h "
+	end
+
+	if ( time["minutes"] > 0 ) then
+		time["string"] = time["string"] .. string.format( "%d", time["minutes"] % 60 ) .. "m "
+	end
+
+	if ( time["seconds"] > 0 ) then
+		time["string"] = time["string"] .. string.format( "%d", time["seconds"] % 60 )
+	end
+
+	if ( time["fraction"] > 0 ) then
+		time["string"] = time["string"] .. "." .. string.format( "%02d", time["fraction"] * 100 )
+	end
+
+	time["string"] = time["string"] .. "s"
+
+	return( time )
+end
+
+local function boilerData( type )
+
+	-- break apart the boiler type string
+	local size = type:gmatch( "%d+" )()
+	local pressure = type:gmatch( "%a+" )()
+
+	if ( size == nil or pressure == nil ) then
+		error( "Unable to parse boiler type string" )
+		return( -1 )
+	end
+
+	-- convert for consistency
+	size = tonumber( size )
+	pressure = pressure:lower()
+
+	local boiler = {}
+
+	boiler["minTemp"] = 20
+	boiler["currentTemp"] = 20
+
+	if ( pressure == "lp" ) then
+
+		boiler["pressure"] = "low"
+		boiler["maxTemp"] = 500
+
+	elseif ( pressure == "hp" ) then
+
+		boiler["pressure"] = "high"
+		boiler["maxTemp"] = 1000
+	else
+		error( "Boiler must be LP or HP" )
+		return( -1 )
+	end
+
+	if ( size == 1 or size == 8 or size == 12 or size == 18
+			or size == 27 or size == 36 ) then
+		boiler["size"] = size
+	else
+		error( "Invalid boiler size: " .. size )
+		return( -1 )
+	end
+
+	return( boiler )
+end
+
+local heatStep = 0.05
+
+local function burnTime( boiler, heatUnits )
+
+	local boilerSize = boiler["size"]
+	local boilerMaxTemp = boiler["maxTemp"]
+	local currentTemp = boiler["currentTemp"]
+
+	if ( currentTemp > boilerMaxTemp ) then
+		currentTemp = boilerMaxTemp
+	end
+
+	-- 16 == low pressure, 8 == high pressure
+	local hplp_div
+	if ( boiler["pressure"] == "high" ) then
+		hplp_div = 8
+	elseif ( boiler["pressure"] == "low" ) then
+		hplp_div = 16
+	end
+
+	local heatLevel = currentTemp / boilerMaxTemp
+
+	local baseFuelUsage = ( ( 6.4 - boilerSize * 0.08 ) / hplp_div ) * boilerSize
+	local adjFuelUsage = baseFuelUsage + baseFuelUsage * ( 8 - 8 * heatLevel )
+
+	return( math.floor( ( heatUnits / adjFuelUsage ) + 0.5 ) )
+
+end
+
+local function getHeatUpTime( boiler, targetTemp )
+
+	local boilerSize = boiler["size"]
+	local boilerMaxTemp = boiler["maxTemp"]
+	local currentTemp = boiler["currentTemp"]
+
+	if ( targetTemp > boilerMaxTemp ) then
+		targetTemp = boilerMaxTemp
+	end
+
+	-- 16 == low pressure, 8 == high pressure
+	local hplp_div
+	if ( boiler["pressure"] == "high" ) then
+		hplp_div = 8
+	elseif ( boiler["pressure"] == "low" ) then
+		hplp_div = 16
+	end
+
+	local totalTicks = 0
+	local totalFuel = 0
+
+	while currentTemp < targetTemp do
+
+		local heatLevel = currentTemp / boilerMaxTemp
+		local change = heatStep
+
+		if ( heatLevel < 0.25 ) then
+	 		change = change + heatStep
+		end
+	
+		if ( heatLevel < 0.5 ) then
+		 	change = change + heatStep
+	 	end
+
+		if ( heatLevel < 0.75 ) then
+		 	change = change + heatStep
+		end
+
+		change = change / boilerSize
+		currentTemp = currentTemp + change
+		currentTemp = math.min( currentTemp, boilerMaxTemp )
+
+		local baseFuelUsage = ( ( 6.4 - boilerSize * 0.08 ) / hplp_div ) * boilerSize
+		local adjFuelUsage = baseFuelUsage + baseFuelUsage * ( 8 - 8 * heatLevel )
+
+		totalTicks = totalTicks + 1
+		totalFuel = totalFuel + adjFuelUsage
+
+	end
+
+	local result = { ["ticks"] = totalTicks, ["heatUnits"] = totalFuel }
+	return( result )
+
+end
+
+local function getCoolDownTime( boiler, targetTemp )
+
+	local boilerSize = boiler["size"]
+	local boilerMaxTemp = boiler["maxTemp"]
+	local boilerMinTemp = boiler["minTemp"]
+	local currentTemp = boiler["currentTemp"]
+
+	if ( targetTemp < boilerMinTemp ) then
+		targetTemp = boilerMinTemp
+	end
+
+	local totalTicks = 0
+
+	while currentTemp > targetTemp do
+
+		local heatLevel = currentTemp / boilerMaxTemp
+		local change = heatStep
+
+		if ( heatLevel > 0.25 ) then
+			change = change + heatStep
+		end
+	
+		if ( heatLevel > 0.5 ) then
+			change = change + heatStep
+		end
+
+		if ( heatLevel > 0.75 ) then
+			change = change + heatStep
+		end
+
+		change = change / boilerSize
+		currentTemp = currentTemp - change
+		currentTemp = math.max( currentTemp, boilerMinTemp )
+
+		totalTicks = totalTicks + 1
+
+	end
+
+	local result = { ["ticks"] = totalTicks }
+	return( result )
+
+end
+
+local boiler = {}
+local args = { ... }
+
+if ( #args == 4 ) then
+
+	local boiler = boilerData( args[1] )
+
+	if ( boiler == -1 ) then
+		exit()
+	end
+
+	local cmd = args[2]
+
+	local val, runtime
+
+	if ( cmd == "heat" ) then
+
+		local startTemp = tonumber( args[3] )
+		local endTemp = tonumber( args[4] )
+
+		if ( startTemp >= endTemp ) then
+			error("Already at/over final temperature")
+			return( -1 )
+		end
+
+		boiler["currentTemp"] = startTemp
+
+		val = getHeatUpTime( boiler, endTemp )
+		runtime = ticksToTime( val["ticks"] )
+
+		print( "Time to heat up from " .. startTemp .. "C to " .. endTemp .. "C" )
+		print( "ticks    : " .. val["ticks"] )
+		print( "time     : " .. runtime["seconds"] .. " ( " .. runtime["string"] .. " )" )
+		print( "heat used: " .. string.format( "%-10d", val["heatUnits"] ) )
+
+	elseif ( cmd == "cool" ) then
+
+		local startTemp = tonumber( args[3] )
+		local endTemp = tonumber( args[4] )
+
+		if ( startTemp <= endTemp ) then
+			error("Already at/below final temperature")
+			return( -1 )
+		end
+
+		boiler["currentTemp"] = startTemp
+
+		val = getCoolDownTime( boiler, endTemp )
+		runtime = ticksToTime( val["ticks"] )
+
+		print( "Time to cool down from " .. startTemp .. "C to " .. endTemp .. "C" )
+		print( "ticks  : " .. val["ticks"] )
+		print( "seconds: " .. runtime["seconds"] .. " ( " .. runtime["string"] .. " )" )
+
+	elseif ( cmd == "burn" ) then
+
+		local targetTemp = tonumber( args[3] )
+		local totalFuel = tonumber( args[4] )
+
+		if ( targetTemp < boiler["minTemp"]
+				or targetTemp > boiler["maxTemp"] ) then
+			error( "Temperature out of boiler range" )
+			return( -1 )
+		end
+
+		boiler["currentTemp"] = targetTemp
+
+		val = burnTime( boiler, totalFuel )
+		runtime = ticksToTime( val )
+
+		print( "Burn time for " .. totalFuel .. " units at " .. targetTemp .. "C" )
+		print( "ticks  : " ..  val )
+		print( "seconds: " .. runtime["seconds"] .. " ( " .. runtime["string"] .. " )" )
+
+	end
+else
+	usage()
+end
