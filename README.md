@@ -2,7 +2,7 @@ This is a number of scripts and support libraries for managing Railcraft boilers
 in Minecraft.
 
 
-## fuel-miser ##
+## fuel-miser
 
 	This script monitors boiler temperature, and dispenses fuel a little
 	at a time, instead of keeping the boiler's internal fuel tank
