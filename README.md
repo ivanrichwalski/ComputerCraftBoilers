@@ -12,3 +12,8 @@ benefit is that if you can shutdown a boiler faster, since you don't
 have to wait for the internal fuel tank to run dry. If the internal
 tank was filled with 16 buckets of fuel, it can which can take
 over 80 minutes with a 36HP boiler, and more than 2 days for a 1LP )
+
+## boiler-calc
+
+Tool for simulating boiler operation details, such as heating up,
+cooling down, and how long a boiler runs on a given amount of fuel
